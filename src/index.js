@@ -23,7 +23,7 @@ app.use('/api', authMiddleware, publishRoutes);
 app.use(errorHandler);
 
 // ── Boot ────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+app.listen(PORT, '127.0.0.1', () => {
   console.log(`\n🚀  ravist-ig-publish running on http://localhost:${PORT}`);
   console.log(`📋  Health          →  GET  http://localhost:${PORT}/health`);
   console.log(`📤  Publish         →  POST http://localhost:${PORT}/api/publish`);
