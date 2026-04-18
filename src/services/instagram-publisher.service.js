@@ -109,15 +109,18 @@ async function waitForContainer(containerId, token) {
     await sleep(POLL_INTERVAL_MS);
 
     const res = await axios.get(`${GRAPH_BASE}/${containerId}`, {
-      params: { fields: 'status_code,status', access_token: token },
+      params: { fields: 'status_code,status,error_message', access_token: token },
       timeout: TIMEOUT_MS,
     });
 
-    const { status_code, status } = res.data;
+    const { status_code, status, error_message } = res.data;
     console.log(`[publisher]   attempt ${i}/${POLL_MAX_ATTEMPTS} → ${status_code}`);
 
     if (status_code === 'FINISHED') return;
-    if (status_code === 'ERROR')    throw new Error(`Container error: ${status ?? 'unknown'}`);
+    if (status_code === 'ERROR') {
+      const msg = error_message ? `${status} (${error_message})` : status;
+      throw new Error(`Container error: ${msg ?? 'unknown'}`);
+    }
     if (status_code === 'EXPIRED')  throw new Error('Container expired before publishing.');
     // IN_PROGRESS → keep polling
   }
@@ -127,16 +130,33 @@ async function waitForContainer(containerId, token) {
 
 // ─── Graph API calls ──────────────────────────────────────────────────────────
 
-async function createContainer({ igUserId, token, videoUrl, caption, isStory }) {
+function isImage(url) {
+  const extension = url.toLowerCase().split('?')[0].split('.').pop();
+  return ['jpg', 'jpeg', 'png', 'webp'].includes(extension);
+}
+
+async function createContainer({ igUserId, token, mediaUrl, caption, isStory }) {
+  const isImg = isImage(mediaUrl);
+  
   const params = {
     access_token: token,
-    video_url:    videoUrl,
-    media_type:   isStory ? 'STORIES' : 'REELS',
   };
 
-  if (!isStory) {
+  if (isStory) {
+    params.media_type = 'STORIES';
+    if (isImg) params.image_url = mediaUrl;
+    else params.video_url = mediaUrl;
+  } else {
+    // For feed/reels
+    if (isImg) {
+      params.media_type = 'IMAGE';
+      params.image_url  = mediaUrl;
+    } else {
+      params.media_type = 'REELS';
+      params.video_url  = mediaUrl;
+    }
     params.caption       = caption;
-    params.share_to_feed = 'true';   // also appears on profile grid
+    params.share_to_feed = 'true';
   }
 
   const res = await axios.post(
@@ -149,7 +169,8 @@ async function createContainer({ igUserId, token, videoUrl, caption, isStory }) 
     throw new Error(`createContainer: no ID returned — ${JSON.stringify(res.data)}`);
   }
 
-  console.log(`[publisher] Container created: ${res.data.id} (${isStory ? 'Story' : 'Reel'})`);
+  const typeLabel = isStory ? 'Story' : (isImg ? 'Post' : 'Reel');
+  console.log(`[publisher] Container created: ${res.data.id} (${typeLabel})`);
   return res.data.id;
 }
 
@@ -186,7 +207,7 @@ async function getPermalink(mediaId, token) {
 // ─── Publish flows ────────────────────────────────────────────────────────────
 
 async function publishReel({ igUserId, token, videoUrl, caption }) {
-  const containerId = await createContainer({ igUserId, token, videoUrl, caption, isStory: false });
+  const containerId = await createContainer({ igUserId, token, mediaUrl: videoUrl, caption, isStory: false });
   await waitForContainer(containerId, token);
   const mediaId   = await publishContainer({ igUserId, token, containerId });
   const permalink = await getPermalink(mediaId, token);
@@ -194,7 +215,7 @@ async function publishReel({ igUserId, token, videoUrl, caption }) {
 }
 
 async function publishStory({ igUserId, token, videoUrl }) {
-  const containerId = await createContainer({ igUserId, token, videoUrl, isStory: true });
+  const containerId = await createContainer({ igUserId, token, mediaUrl: videoUrl, isStory: true });
   await waitForContainer(containerId, token);
   const mediaId = await publishContainer({ igUserId, token, containerId });
   return { mediaId };
