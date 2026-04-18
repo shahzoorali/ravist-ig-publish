@@ -23,6 +23,8 @@ router.post('/publish', async (req, res, next) => {
       caption,          // final caption — already edited by admin
       publishPost  = true,
       publishStory = true,
+      storyLinkUrl,
+      eventId,
     } = req.body;
 
     // Validation
@@ -42,12 +44,16 @@ router.post('/publish', async (req, res, next) => {
 
     console.log(`[publish] videoUrl: ${videoUrl.slice(0, 60)}...`);
     console.log(`[publish] publishPost: ${publishPost}, publishStory: ${publishStory}`);
+    if (eventId) console.log(`[publish] Auto-linking eventId: ${eventId}`);
+    if (storyLinkUrl) console.log(`[publish] Explicit storyLinkUrl: ${storyLinkUrl}`);
 
     const result = await publishToInstagram({
       videoUrl,
       caption,
       publishPost,
       publishStory,
+      storyLinkUrl,
+      eventId,
     });
 
     return res.json({

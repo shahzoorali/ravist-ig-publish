@@ -108,10 +108,19 @@ async function waitForContainer(containerId, token) {
   for (let i = 1; i <= POLL_MAX_ATTEMPTS; i++) {
     await sleep(POLL_INTERVAL_MS);
 
-    const res = await axios.get(`${GRAPH_BASE}/${containerId}`, {
-      params: { fields: 'status_code,status,error_message', access_token: token },
-      timeout: TIMEOUT_MS,
-    });
+    let res;
+    try {
+      res = await axios.get(`${GRAPH_BASE}/${containerId}`, {
+        params: { fields: 'status_code,status,error_message', access_token: token },
+        timeout: TIMEOUT_MS,
+      });
+    } catch (err) {
+      // Fallback if error_message is not supported for this container type
+      res = await axios.get(`${GRAPH_BASE}/${containerId}`, {
+        params: { fields: 'status_code,status', access_token: token },
+        timeout: TIMEOUT_MS,
+      });
+    }
 
     const { status_code, status, error_message } = res.data;
     console.log(`[publisher]   attempt ${i}/${POLL_MAX_ATTEMPTS} → ${status_code}`);
@@ -135,7 +144,7 @@ function isImage(url) {
   return ['jpg', 'jpeg', 'png', 'webp'].includes(extension);
 }
 
-async function createContainer({ igUserId, token, mediaUrl, caption, isStory }) {
+async function createContainer({ igUserId, token, mediaUrl, caption, isStory, stickerUrl }) {
   const isImg = isImage(mediaUrl);
   
   const params = {
@@ -146,6 +155,22 @@ async function createContainer({ igUserId, token, mediaUrl, caption, isStory }) 
     params.media_type = 'STORIES';
     if (isImg) params.image_url = mediaUrl;
     else params.video_url = mediaUrl;
+
+    // Add Link Sticker if provided
+    if (stickerUrl) {
+      params.interactive_sticker_json = JSON.stringify([
+        {
+          link_sticker: {
+            url: stickerUrl
+          },
+          x: 0.5,
+          y: 0.5,
+          width: 0.8,
+          height: 0.1,
+          rotation: 0.0
+        }
+      ]);
+    }
   } else {
     // For feed/reels
     if (isImg) {
@@ -156,7 +181,9 @@ async function createContainer({ igUserId, token, mediaUrl, caption, isStory }) 
       params.video_url  = mediaUrl;
     }
     params.caption       = caption;
-    params.share_to_feed = 'true';
+    if (!isImg) {
+      params.share_to_feed = 'true';
+    }
   }
 
   const res = await axios.post(
@@ -214,8 +241,8 @@ async function publishReel({ igUserId, token, videoUrl, caption }) {
   return { mediaId, permalink };
 }
 
-async function publishStory({ igUserId, token, videoUrl }) {
-  const containerId = await createContainer({ igUserId, token, mediaUrl: videoUrl, isStory: true });
+async function publishStory({ igUserId, token, videoUrl, stickerUrl }) {
+  const containerId = await createContainer({ igUserId, token, mediaUrl: videoUrl, isStory: true, stickerUrl });
   await waitForContainer(containerId, token);
   const mediaId = await publishContainer({ igUserId, token, containerId });
   return { mediaId };
@@ -229,12 +256,20 @@ async function publishStory({ igUserId, token, videoUrl }) {
  * @param {object}   opts
  * @param {string}   opts.videoUrl      S3 URL of the event poster/video
  * @param {string}   opts.caption       Final caption (admin-edited or auto-built)
+ * @param {string}   [opts.storyLinkUrl]  Explicit URL for a link sticker
+ * @param {string}   [opts.eventId]       If provided, generates 'https://ravist.in/events/{eventId}' for stories
  * @param {boolean}  [opts.publishPost=true]
  * @param {boolean}  [opts.publishStory=true]
  */
-async function publishToInstagram({ videoUrl, caption, publishPost = true, publishStory: doStory = true }) {
+async function publishToInstagram({ videoUrl, caption, storyLinkUrl, eventId, publishPost = true, publishStory: doStory = true }) {
   if (!videoUrl)              throw new Error('videoUrl is required');
   if (publishPost && !caption) throw new Error('caption is required when publishing a post');
+
+  // Auto-generate story link if eventId is provided and no explicit link exists
+  let finalStoryLink = storyLinkUrl;
+  if (!finalStoryLink && eventId) {
+    finalStoryLink = `https://ravist.in/events/${eventId}`;
+  }
 
   const { token, igUserId } = getConfig();
   const results = { errors: [] };
@@ -254,7 +289,7 @@ async function publishToInstagram({ videoUrl, caption, publishPost = true, publi
 
   if (doStory) {
     tasks.push(
-      publishStory({ igUserId, token, videoUrl })
+      publishStory({ igUserId, token, videoUrl, stickerUrl: finalStoryLink })
         .then(data => { results.story = data; })
         .catch(err => {
           console.error('[publisher] Story failed:', err.message);
