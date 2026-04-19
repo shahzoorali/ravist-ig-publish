@@ -281,8 +281,10 @@ async function publishToInstagram({ videoUrl, caption, storyLinkUrl, eventId, pu
       publishReel({ igUserId, token, videoUrl, caption })
         .then(data => { results.post = data; })
         .catch(err => {
-          console.error('[publisher] Reel failed:', err.message);
-          results.errors.push(`post: ${err.message}`);
+          const apiError = err.response?.data?.error?.message || err.message;
+          console.error('[publisher] Reel failed:', apiError);
+          if (err.response?.data) console.error('[publisher] Reel full error:', JSON.stringify(err.response.data, null, 2));
+          results.errors.push(`post: ${apiError}`);
         })
     );
   }
@@ -292,8 +294,10 @@ async function publishToInstagram({ videoUrl, caption, storyLinkUrl, eventId, pu
       publishStory({ igUserId, token, videoUrl, stickerUrl: finalStoryLink })
         .then(data => { results.story = data; })
         .catch(err => {
-          console.error('[publisher] Story failed:', err.message);
-          results.errors.push(`story: ${err.message}`);
+          const apiError = err.response?.data?.error?.message || err.message;
+          console.error('[publisher] Story failed:', apiError);
+          if (err.response?.data) console.error('[publisher] Story full error:', JSON.stringify(err.response.data, null, 2));
+          results.errors.push(`story: ${apiError}`);
         })
     );
   }
